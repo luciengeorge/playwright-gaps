@@ -1,0 +1,84 @@
+{
+  "name": "playwright-gaps",
+  "version": "0.1.0",
+  "description": "Playwright Test fixtures for features Playwright declined: network throttling presets, touch gestures (tap, swipe, longPress, pan, pinch) and persistent contexts / Chrome extensions configured from playwright.config.",
+  "license": "MIT",
+  "author": "Lucien George",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./persistent": {
+      "import": {
+        "types": "./dist/persistent.d.ts",
+        "default": "./dist/persistent.js"
+      },
+      "require": {
+        "types": "./dist/persistent.d.cts",
+        "default": "./dist/persistent.cjs"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "playwright test",
+    "test:dist": "node scripts/check-dist.mjs && node scripts/check-dist.cjs",
+    "prepublishOnly": "npm run typecheck && npm run build && npm run test:dist",
+    "pretest": "npm run build",
+    "test:consumer": "bash scripts/consumer-smoke.sh"
+  },
+  "keywords": [
+    "playwright",
+    "playwright-test",
+    "fixtures",
+    "network-throttling",
+    "slow-3g",
+    "touch",
+    "gestures",
+    "swipe",
+    "pinch",
+    "persistent-context",
+    "chrome-extension",
+    "e2e"
+  ],
+  "peerDependencies": {
+    "@playwright/test": ">=1.40.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/luciengeorge/playwright-gaps.git"
+  },
+  "homepage": "https://github.com/luciengeorge/playwright-gaps#readme",
+  "bugs": {
+    "url": "https://github.com/luciengeorge/playwright-gaps/issues"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.64.1",
+    "@types/node": "^20.19.43",
+    "tsup": "^8.5.1",
+    "typescript": "~5.9.3"
+  }
+}

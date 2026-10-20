@@ -1,0 +1,8 @@
+{
+  "manifest_version": 3,
+  "name": "playwright-gaps test extension",
+  "version": "1.0.0",
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [{ "matches": ["http://127.0.0.1/*"], "js": ["content.js"], "run_at": "document_end" }],
+  "action": { "default_popup": "popup.html" }
+}

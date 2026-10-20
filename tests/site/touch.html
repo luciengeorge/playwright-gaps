@@ -1,0 +1,63 @@
+<!doctype html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>touch fixture</title>
+<style>
+  body { margin: 0; font-family: sans-serif; }
+  #pad { position: absolute; left: 40px; top: 60px; width: 400px; height: 300px; background: #eef; touch-action: none; }
+  #btn { position: absolute; left: 500px; top: 60px; width: 120px; height: 60px; }
+  #carousel { position: absolute; left: 40px; top: 400px; width: 300px; height: 120px; background: #efe; touch-action: pan-y; }
+  #zoom { position: absolute; left: 500px; top: 200px; width: 300px; height: 300px; background: #fee; touch-action: none; }
+</style>
+</head>
+<body>
+<div id="pad"></div>
+<button id="btn">tap me</button>
+<div id="carousel">slide <span id="slide">0</span></div>
+<div id="zoom">scale <span id="scale">1</span></div>
+<script>
+  // Records every touch/pointer/click event so tests can assert on exactly what the page saw.
+  window.__log = [];
+  const types = ['touchstart', 'touchmove', 'touchend', 'touchcancel', 'pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'click', 'contextmenu'];
+  for (const type of types) {
+    document.addEventListener(type, (e) => {
+      const entry = { type, t: e.timeStamp, trusted: e.isTrusted, target: e.target && e.target.id };
+      if (e.touches) {
+        entry.touches = Array.from({ length: e.touches.length }, (_, i) => { const t = e.touches[i]; return { id: t.identifier, x: t.clientX, y: t.clientY }; });
+        entry.changed = Array.from({ length: e.changedTouches.length }, (_, i) => { const t = e.changedTouches[i]; return { id: t.identifier, x: t.clientX, y: t.clientY }; });
+      } else if ('clientX' in e) {
+        entry.x = e.clientX; entry.y = e.clientY; entry.pointerType = e.pointerType; entry.pointerId = e.pointerId;
+      }
+      window.__log.push(entry);
+    }, { capture: true, passive: type !== 'contextmenu' });
+  }
+  document.addEventListener('contextmenu', (e) => e.preventDefault());
+
+  // A swipe carousel written the way app code usually is: Touch Events.
+  let sx = null;
+  const carousel = document.getElementById('carousel');
+  carousel.addEventListener('touchstart', (e) => { sx = e.touches[0].clientX; });
+  carousel.addEventListener('touchend', (e) => {
+    if (sx === null) return;
+    const dx = e.changedTouches[0].clientX - sx; sx = null;
+    const s = document.getElementById('slide');
+    if (dx < -50) s.textContent = String(Number(s.textContent) + 1);
+    if (dx > 50) s.textContent = String(Number(s.textContent) - 1);
+  });
+
+  // A pinch-zoom written with Pointer Events (the modern way), tracking two pointers.
+  const zoom = document.getElementById('zoom');
+  const pts = new Map(); let d0 = null;
+  const dist = () => { const [a, b] = [...pts.values()]; return Math.hypot(a.x - b.x, a.y - b.y); };
+  zoom.addEventListener('pointerdown', (e) => { pts.set(e.pointerId, { x: e.clientX, y: e.clientY }); if (pts.size === 2) d0 = dist(); });
+  zoom.addEventListener('pointermove', (e) => {
+    if (!pts.has(e.pointerId)) return;
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pts.size === 2 && d0) document.getElementById('scale').textContent = (dist() / d0).toFixed(3);
+  });
+  zoom.addEventListener('pointerup', (e) => { pts.delete(e.pointerId); if (pts.size < 2) d0 = null; });
+  zoom.addEventListener('pointercancel', (e) => { pts.delete(e.pointerId); d0 = null; });
+</script>
+</body>
+</html>
