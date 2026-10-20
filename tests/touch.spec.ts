@@ -40,7 +40,7 @@ test('tap: touchstart/touchend + pointer events + click at the exact coordinates
 });
 
 test('swipe left advances a Touch-Events carousel; moves follow a straight path', async ({ page, touch }) => {
-  await touch.swipe(page.locator('#carousel'), { direction: 'left', distance: 120, steps: 6 });
+  await touch.swipe(page.locator('#carousel'), { direction: 'left', distance: 120, steps: 6, durationMs: 600 });
   await expect(page.locator('#slide')).toHaveText('1');
   await touch.swipe(page.locator('#carousel'), { direction: 'right', distance: 120 });
   await expect(page.locator('#slide')).toHaveText('0');
@@ -66,7 +66,7 @@ test('longPress holds for the requested duration', async ({ page, touch }) => {
 });
 
 test('pan moves one finger from A to B with the given number of steps', async ({ page, touch }) => {
-  await touch.pan({ x: 60, y: 80 }, { x: 400, y: 330 }, { steps: 5, durationMs: 100 });
+  await touch.pan({ x: 60, y: 80 }, { x: 400, y: 330 }, { steps: 5, durationMs: 500 });
   const events = await log(page);
   const moves = events.filter((e) => e.type === 'touchmove');
   expect(moves).toHaveLength(5);
@@ -114,4 +114,20 @@ test('low-level multi-touch: start/move/end individual fingers', async ({ page, 
   expect(lastMove.touches!.find((t) => t.id === 1)).toMatchObject({ x: 220, y: 120 });
   const ends = events.filter((e) => e.type === 'touchend');
   expect(ends.at(-1)!.touches).toHaveLength(0);
+});
+
+test('gestures take durationMs even when dispatch is slow (velocity-sensitive libraries)', async ({ page, touch }) => {
+  // 20 steps in 200ms = 10ms/step, faster than headless Chromium acknowledges CDP touch events.
+  await touch.swipe(page.locator('#pad'), { direction: 'left', distance: 200, durationMs: 200, steps: 20 });
+  const events = await log(page);
+  const start = events.find((e) => e.type === 'touchstart')!;
+  const end = events.find((e) => e.type === 'touchend')!;
+  const moves = events.filter((e) => e.type === 'touchmove');
+  test.info().annotations.push({ type: 'measured', description: `${test.info().project.name}: ${Math.round(end.t - start.t)}ms, ${moves.length} moves` });
+  expect(end.t - start.t).toBeGreaterThan(180);
+  expect(end.t - start.t).toBeLessThan(290); // a short swipe for Swiper (<300ms) must stay short
+  expect(moves.length).toBeGreaterThan(3);
+  expect(moves.length).toBeLessThanOrEqual(20);
+  const box = (await page.locator('#pad').boundingBox())!;
+  expect(near(moves.at(-1)!.touches![0].x, box.x + box.width / 2 - 200)).toBe(true); // always ends on target
 });

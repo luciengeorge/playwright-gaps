@@ -11,6 +11,7 @@ npm run typecheck
 npm test            # all three browsers
 npm test -- --project=firefox tests/touch.spec.ts
 npm run build && npm run test:dist
+npm run test:real-world   # needs internet: CDN libraries, uBlock Origin Lite, live sites
 ```
 
 The tests run against local HTML in `tests/site/`, served by `tests/server.mjs` with no dependencies. That server also provides `/bytes?kb=N`, `/upload` and `/heavy.html`. The test extension is in `tests/extension/`.

@@ -1,3 +1,4 @@
+import { gzipSync } from 'node:zlib';
 import type { BrowserContext, CDPSession, Page, Route } from '@playwright/test';
 
 /** Named network profiles. Values match Chrome DevTools' built-in presets. */
@@ -51,7 +52,7 @@ export const presets: Record<ThrottlePreset, Required<NetworkConditions>> = {
   // Chrome DevTools "Slow 3G": 500 kbps * 0.8, RTT 400ms * 5
   'slow-3g': { downloadKbps: 400, uploadKbps: 400, latencyMs: 2000, offline: false },
   // Chrome DevTools "Fast 3G" (a.k.a. "Slow 4G" in newer DevTools): 1.6 Mbps * 0.9 down, 750 kbps * 0.9 up, RTT 150ms * 3.75
-  'fast-3g': { downloadKbps: 1440, uploadKbps: 675, latencyMs: 563, offline: false },
+  'fast-3g': { downloadKbps: 1440, uploadKbps: 675, latencyMs: 562.5, offline: false },
   // Chrome DevTools "Fast 4G": 9 Mbps * 0.9 down, 1.5 Mbps * 0.9 up, RTT 60ms * 2.75
   'fast-4g': { downloadKbps: 8100, uploadKbps: 1350, latencyMs: 165, offline: false },
   offline: { downloadKbps: 0, uploadKbps: 0, latencyMs: 0, offline: true },
@@ -147,6 +148,23 @@ async function setOffline(context: BrowserContext, offline: boolean) {
   }
 }
 
+/**
+ * Bytes a response would take on the wire. Uses `content-length` when the response was
+ * content-encoded (it then describes the compressed body); without one (chunked / HTTP/2),
+ * estimates by gzipping the decoded body.
+ */
+export function wireBytes(headers: Record<string, string>, body: Buffer): number {
+  const encoding = (headers['content-encoding'] ?? '').trim().toLowerCase();
+  if (!encoding || encoding === 'identity') return body.length;
+  const declared = Number(headers['content-length']);
+  if (Number.isFinite(declared) && declared > 0 && declared <= body.length) return declared;
+  try {
+    return Math.min(body.length, gzipSync(body, { level: 6 }).length);
+  } catch {
+    return body.length;
+  }
+}
+
 /* ----------------------------- Chromium / CDP ----------------------------- */
 
 async function tryCdp(
@@ -160,14 +178,38 @@ async function tryCdp(
 
   const sessions = new Map<Page, CDPSession>();
   const pending = new Map<Page, Promise<void>>();
-  const send = async (session: CDPSession) => {
-    const c = getConditions();
+  // Chrome DevTools itself uses emulateNetworkConditionsByRule + overrideNetworkState; the older
+  // emulateNetworkConditions is deprecated. Use the new pair and fall back if the browser lacks it.
+  let legacy = false;
+  const send = async (session: CDPSession, c: Required<NetworkConditions> = getConditions()) => {
+    const down = c.downloadKbps > 0 ? (c.downloadKbps * 1000) / 8 : 0; // bytes/s, 0 = unlimited
+    const up = c.uploadKbps > 0 ? (c.uploadKbps * 1000) / 8 : 0;
+    const active = c.latencyMs > 0 || down > 0 || up > 0;
+    if (!legacy) {
+      try {
+        await session.send('Network.emulateNetworkConditionsByRule', {
+          offline: c.offline,
+          matchedNetworkConditions: active
+            ? [{ urlPattern: '', latency: c.latencyMs, downloadThroughput: down, uploadThroughput: up }]
+            : [],
+        });
+        await session.send('Network.overrideNetworkState', {
+          offline: c.offline,
+          latency: c.latencyMs,
+          downloadThroughput: down || -1,
+          uploadThroughput: up || -1,
+        });
+        return;
+      } catch (e) {
+        if (isClosedError(e)) throw e;
+        legacy = true;
+      }
+    }
     await session.send('Network.emulateNetworkConditions', {
       offline: c.offline,
       latency: c.latencyMs,
-      // CDP wants bytes/second; -1 disables the limit.
-      downloadThroughput: c.downloadKbps > 0 ? (c.downloadKbps * 1000) / 8 : -1,
-      uploadThroughput: c.uploadKbps > 0 ? (c.uploadKbps * 1000) / 8 : -1,
+      downloadThroughput: down || -1, // -1 disables the limit
+      uploadThroughput: up || -1,
     });
   };
   const attach = (page: Page): Promise<void> => {
@@ -229,9 +271,7 @@ async function tryCdp(
     async dispose() {
       if (!isPage(target)) context.off('page', onPage);
       for (const s of sessions.values()) {
-        await s
-          .send('Network.emulateNetworkConditions', { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 })
-          .catch(() => {});
+        await send(s, presets['no-throttling']).catch(() => {});
         await s.detach().catch(() => {});
       }
       sessions.clear();
@@ -276,7 +316,10 @@ function routeThrottle(
       }
       const response = await route.fetch();
       const body = await response.body();
-      await sleep(c.latencyMs / 2 + reserve('down', transferMs(body.length, c.downloadKbps)));
+      // Charge what would cross the wire, not the decoded body: route.fetch() hands us decompressed
+      // bytes, which for gzip/brotli HTML/JS/CSS is typically 3-6x bigger.
+      const bytes = wireBytes(response.headers(), body);
+      await sleep(c.latencyMs / 2 + reserve('down', transferMs(bytes, c.downloadKbps)));
       await route.fulfill({ response, body });
     } catch (e) {
       if (isClosedError(e)) return;

@@ -20,7 +20,10 @@ export interface TouchOptions {
 export interface GestureTiming {
   /** Total duration of the movement. */
   durationMs?: number;
-  /** Number of touchmove events emitted. */
+  /**
+   * Maximum number of touchmove events. Intermediate moves are dropped if dispatching can't keep up
+   * with `durationMs` (headless Chromium needs ~16-33ms per CDP touch event), so the gesture keeps its speed.
+   */
   steps?: number;
 }
 
@@ -308,14 +311,29 @@ async function path(
   opts: GestureTiming,
 ) {
   const steps = Math.max(1, Math.round(opts.steps ?? 10));
-  const duration = opts.durationMs ?? 250;
+  const duration = Math.max(0, opts.durationMs ?? 250);
+  const at = (i: number) =>
+    fingers.map((f) => ({
+      id: f.id,
+      x: f.from.x + ((f.to.x - f.from.x) * i) / steps,
+      y: f.from.y + ((f.to.y - f.from.y) * i) / steps,
+    }));
   await ctl.start(fingers.map((f) => ({ id: f.id, ...f.from })));
-  for (let i = 1; i <= steps; i++) {
-    await sleep(duration / steps);
-    const t = i / steps;
-    await ctl.move(
-      fingers.map((f) => ({ id: f.id, x: f.from.x + (f.to.x - f.from.x) * t, y: f.from.y + (f.to.y - f.from.y) * t })),
-    );
+  // Moves are scheduled against an absolute timeline so the gesture takes `durationMs`
+  // (velocity-sensitive libraries such as Swiper and Hammer care). Each dispatch has a cost
+  // (headless Chromium acknowledges a CDP touch event after ~1-2 frames), so when we fall behind
+  // we skip intermediate points rather than stretching the gesture. The final point is always sent.
+  const t0 = Date.now();
+  let i = 0;
+  while (i < steps) {
+    if (duration > 0) {
+      await sleep(t0 + ((i + 1) * duration) / steps - Date.now());
+      const due = Math.floor(((Date.now() - t0) / duration) * steps);
+      i = Math.min(steps, Math.max(i + 1, due));
+    } else {
+      i++;
+    }
+    await ctl.move(at(i));
   }
   await ctl.end();
 }

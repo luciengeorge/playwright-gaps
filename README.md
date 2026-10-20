@@ -11,10 +11,11 @@ Playwright Test fixtures for three features the Playwright team has decided not 
 This package is those "lightweight fixtures", written once and tested on Chromium, Firefox and WebKit. It isn't affiliated with Microsoft or the Playwright project.
 
 ```sh
-npm i -D playwright-gaps
+npm i -D @playwright/test playwright-gaps
+npx playwright install   # first time only: downloads Chromium, Firefox and WebKit
 ```
 
-Requires `@playwright/test` >= 1.40 as a peer dependency. CI runs against 1.64. Node >= 18. Ships ESM and CJS with types.
+`@playwright/test` (>= 1.40) is a peer dependency, so your project's own copy is the one that gets used. Tested with Playwright 1.64 on Node 20, in both ESM (`"type": "module"`) and CommonJS projects. Types are included.
 
 ---
 
@@ -24,16 +25,16 @@ Requires `@playwright/test` >= 1.40 as a peer dependency. CI runs against 1.64. 
 
 ```ts
 // e2e/slow.spec.ts
-import { test, expect } from 'playwright-gaps';
+import { test, expect } from 'playwright-gaps'; // instead of '@playwright/test'
 
 test('shows a skeleton on slow 3G', async ({ page, throttle }) => {
   await throttle('slow-3g'); // or 'fast-3g' | 'fast-4g' | 'offline' | { downloadKbps, uploadKbps, latencyMs }
-  await page.goto('/');
+  await page.goto('/'); // assumes `baseURL` is set in your config, as usual
   await expect(page.getByTestId('skeleton')).toBeVisible();
 });
 ```
 
-To throttle a whole project or file, set it in `use`:
+Or skip the fixture call and throttle a whole project (or a file, with `test.use`) from config. Pick one of the two; you don't need both:
 
 ```ts
 // playwright.config.ts
@@ -48,10 +49,15 @@ export default defineConfig<GapsOptions>({
 Without the fixture (any `Page` or `BrowserContext`):
 
 ```ts
+import { test } from '@playwright/test';
 import { throttle } from 'playwright-gaps';
-const handle = await throttle(page, { downloadKbps: 1600, uploadKbps: 750, latencyMs: 150 });
-await handle.update('offline');
-await handle.stop();
+
+test('works with the plain Playwright test too', async ({ page }) => {
+  const handle = await throttle(page, { downloadKbps: 1600, uploadKbps: 750, latencyMs: 150 });
+  await page.goto('https://example.com');
+  await handle.update('offline');
+  await handle.stop();
+});
 ```
 
 Presets use the Chrome DevTools values:
@@ -80,6 +86,8 @@ test('carousel + pinch zoom', async ({ page, touch }) => {
 });
 ```
 
+Gestures keep to `durationMs` (velocity matters to libraries like Swiper and Hammer.js). `steps` is the *maximum* number of `touchmove`s. Headless Chromium needs roughly 16–33 ms to acknowledge each CDP touch event, so if the steps don't fit in the duration, we drop intermediate points instead of slowing the gesture down.
+
 Multi-touch at a lower level: `touch.start([{ id: 0, x, y }, { id: 1, x, y }])`, `touch.move(...)`, `touch.end()`.
 Standalone: `import { touch } from 'playwright-gaps'; const t = touch(page);`.
 
@@ -93,7 +101,9 @@ import type { PersistentContextOptions } from 'playwright-gaps';
 export default defineConfig<PersistentContextOptions>({
   projects: [{
     name: 'extension',
+    testMatch: /extension/, // keep extension specs out of your firefox/webkit projects
     use: {
+      browserName: 'chromium',
       extensionPaths: ['./dist/my-extension'],  // unpacked MV3 extension(s), Chromium only
       // userDataDir: '.profiles/{project}-{parallelIndex}',  // optional; default is a fresh temp profile per test
     },
@@ -134,9 +144,20 @@ What the test suite in this repo checks on each engine (`npm test`):
 | **Persistent context** | ✅ | ✅ | ✅ |
 | Chrome extensions (`extensionPaths`, `extensionId`) | ✅ (MV3, Playwright's Chromium, headed or headless) | n/a | n/a |
 
+## Checked against real pages and libraries
+
+This was checked with v0.1.1 on Playwright 1.64.1 (Chromium 156, Firefox 157, WebKit 27.2). You can reproduce it with `npm run test:real-world` and `node real-world/measure.mjs <browser>`.
+
+- **Throttle:** cold loads of playwright.dev and Wikipedia's Formula One article under `fast-3g` / `slow-3g`.
+  - Chromium matches DevTools' own CDP calls to within ~1% on fast-3g, and lands 3–10% above the theoretical floor (latency + wire bytes ÷ bandwidth).
+  - The Firefox/WebKit approximation lands within 0.9–1.4× of Chromium's time.
+- **Touch:** Swiper 11 (swipe changes slides), Hammer.js 2.0.8 (tap, press, swipe, pan and pinch recognisers fire) and Leaflet 1.9.4 (pinch changes the zoom level, pan moves the map) all work on all three engines. Only Chromium's trusted events scroll the page natively.
+- **Extensions:** uBlock Origin Lite (MV3, the GitHub release) loads. Its service worker starts, its rulesets are enabled, it swaps Google ad/analytics scripts for its surrogates, and it blocks trackers on a live news site. A run without the extension blocks nothing.
+- **userDataDir:** an HttpOnly session cookie and localStorage survive across two separate `playwright test` processes on all three engines.
+
 ## Known limitations, honestly
 
-**Throttling on Firefox/WebKit is an approximation.** These engines have no network-emulation protocol that Playwright exposes. The fallback therefore intercepts every request with `route('**/*')`, waits for the latency, fetches the response, holds it for `bytes × 8 / downloadKbps` and then fulfills it. Concurrent requests share one simulated link. What this means in practice:
+**Throttling on Firefox/WebKit is an approximation.** These engines have no network-emulation protocol that Playwright exposes. The fallback therefore intercepts every request with `route('**/*')`, waits for the latency, fetches the response, holds it for `wire bytes × 8 / downloadKbps` and then fulfills it. Compressed responses are charged at their compressed size: we use `content-length`, or a gzip estimate when there isn't one. Concurrent requests share one simulated link. What this means in practice:
 - The response arrives all at once at the end. It is not streamed, so progressive rendering and streaming responses look different from a real slow network.
 - WebSockets, EventSource streams, service-worker-initiated requests and requests served from the browser cache are not throttled.
 - `route.fetch()` follows redirects itself, so the browser sees only the final response.

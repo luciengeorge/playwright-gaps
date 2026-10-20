@@ -6,3 +6,5 @@ blob-report/
 .profiles/
 *.tgz
 LAUNCH-DRAFTS.md
+real-world/.ext/
+real-world/.profiles/

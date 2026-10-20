@@ -1,4 +1,5 @@
-import { test, expect, throttle, presets, resolveConditions } from 'playwright-gaps';
+import { test, expect, throttle, presets, resolveConditions, wireBytes } from 'playwright-gaps';
+import { gzipSync } from 'node:zlib';
 
 /** Fetch a resource from inside the page and return how long it took (ms). */
 async function timedFetch(page: import('@playwright/test').Page, url: string, init?: { method: string; bytes: number }) {
@@ -67,6 +68,17 @@ test.describe('throttle()', () => {
     expect(ms).toBeGreaterThan(1024 * 0.8);
   });
 
+  for (const path of ['/gzip', '/gzip-chunked']) {
+    test(`compressed responses are charged at wire size, not decoded size (${path})`, async ({ page, throttle, browserName }) => {
+      await throttle({ downloadKbps: 400 });
+      // 200 KiB decoded, ~1 KiB gzipped. Charging decoded bytes would take 200*1024*8/400 ≈ 4.1 s.
+      const r = await timedFetch(page, `${path}?kb=200`);
+      test.info().annotations.push({ type: 'measured', description: `${browserName} ${path}: ${Math.round(r.ms)}ms (decoded-size charging would be ~4100ms)` });
+      expect(r.bytes).toBe(200 * 1024);
+      expect(r.ms).toBeLessThan(1500);
+    });
+  }
+
   test("'slow-3g' preset: a page with a 100 KiB script takes seconds to load", async ({ page, throttle, browserName }) => {
     await throttle('slow-3g');
     const t0 = Date.now();
@@ -134,9 +146,22 @@ test.describe("strategy: 'route' works on every browser (incl. Chromium)", () =>
 test.describe('conditions', () => {
   test('presets resolve to DevTools values; invalid input throws', () => {
     expect(resolveConditions('slow-3g')).toEqual(presets['slow-3g']);
+    // Chrome DevTools front_end/core/sdk/NetworkManager.ts values
+    expect(presets['slow-3g']).toEqual({ downloadKbps: 500 * 0.8, uploadKbps: 500 * 0.8, latencyMs: 400 * 5, offline: false });
+    expect(presets['fast-3g']).toEqual({ downloadKbps: 1600 * 0.9, uploadKbps: 750 * 0.9, latencyMs: 150 * 3.75, offline: false });
+    expect(presets['fast-4g']).toEqual({ downloadKbps: 9000 * 0.9, uploadKbps: 1500 * 0.9, latencyMs: 60 * 2.75, offline: false });
     expect(resolveConditions({ latencyMs: 5 })).toEqual({ downloadKbps: 0, uploadKbps: 0, latencyMs: 5, offline: false });
     expect(() => resolveConditions('5g' as never)).toThrow(/unknown throttle preset/);
     expect(() => resolveConditions({ downloadKbps: -1 })).toThrow(/non-negative/);
+  });
+
+  test('wireBytes: content-length for encoded bodies, gzip estimate when chunked, raw length otherwise', () => {
+    const body = Buffer.from('a'.repeat(100_000));
+    expect(wireBytes({}, body)).toBe(100_000);
+    expect(wireBytes({ 'content-encoding': 'identity' }, body)).toBe(100_000);
+    expect(wireBytes({ 'content-encoding': 'br', 'content-length': '321' }, body)).toBe(321);
+    expect(wireBytes({ 'content-encoding': 'gzip' }, body)).toBe(gzipSync(body, { level: 6 }).length);
+    expect(wireBytes({ 'content-encoding': 'gzip', 'content-length': '999999999' }, body)).toBeLessThan(100_000);
   });
 
   test("strategy 'cdp' throws outside Chromium", async ({ page, browserName }) => {

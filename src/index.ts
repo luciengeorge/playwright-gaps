@@ -3,6 +3,7 @@ export {
   throttle,
   presets,
   resolveConditions,
+  wireBytes,
   type NetworkConditions,
   type ThrottleHandle,
   type ThrottleInput,

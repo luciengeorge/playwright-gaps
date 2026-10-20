@@ -2,6 +2,7 @@
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
+import { gzipSync } from 'node:zlib';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -18,6 +19,19 @@ createServer(async (req, res) => {
     const body = randomBytes(kb * 1024);
     res.writeHead(200, { ...noStore, 'content-type': 'application/octet-stream', 'content-length': body.length });
     return res.end(body);
+  }
+  if (url.pathname === '/gzip' || url.pathname === '/gzip-chunked') {
+    // /gzip?kb=200 -> 200 KiB of very compressible text, sent gzip-encoded (~1-2 KiB on the wire).
+    // /gzip-chunked: same, but without content-length (chunked), like many HTTP/2 / CDN responses.
+    const kb = Number(url.searchParams.get('kb') ?? 100);
+    const text = 'playwright-gaps compressible line of text 0123456789\n'.repeat(Math.ceil((kb * 1024) / 53)).slice(0, kb * 1024);
+    const gz = gzipSync(Buffer.from(text));
+    const headers = { ...noStore, 'content-type': 'text/plain', 'content-encoding': 'gzip' };
+    if (url.pathname === '/gzip') headers['content-length'] = gz.length;
+    res.writeHead(200, headers);
+    if (url.pathname === '/gzip') return res.end(gz);
+    res.write(gz.subarray(0, gz.length >> 1));
+    return setTimeout(() => res.end(gz.subarray(gz.length >> 1)), 5);
   }
   if (url.pathname === '/upload' && req.method === 'POST') {
     let n = 0;

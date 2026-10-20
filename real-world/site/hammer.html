@@ -1,0 +1,13 @@
+<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>#h{width:500px;height:400px;margin:40px;background:#cde}</style></head>
+<body><div id="h"></div>
+<script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
+<script>
+  window.events = [];
+  const mc = new Hammer.Manager(document.getElementById('h'));
+  const pinch = new Hammer.Pinch(); const swipe = new Hammer.Swipe(); const tap = new Hammer.Tap(); const press = new Hammer.Press({ time: 400 }); const pan = new Hammer.Pan({ threshold: 5 });
+  pinch.recognizeWith(pan);
+  mc.add([pinch, pan, swipe, tap, press]); swipe.recognizeWith(pan);
+  mc.on('pinchend swipeleft swiperight swipeup swipedown tap press panend', (e) => window.events.push({ type: e.type, scale: +e.scale.toFixed(3), dx: Math.round(e.deltaX), dy: Math.round(e.deltaY), pointers: e.pointers.length, input: mc.input.constructor.name }));
+  window.hammerInput = mc.input && mc.input.constructor && mc.input.constructor.name;
+</script></body></html>

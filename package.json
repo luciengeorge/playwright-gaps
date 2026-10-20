@@ -1,6 +1,6 @@
 {
   "name": "playwright-gaps",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Playwright Test fixtures for features Playwright declined: network throttling presets, touch gestures (tap, swipe, longPress, pan, pinch) and persistent contexts / Chrome extensions configured from playwright.config.",
   "license": "MIT",
   "author": "Lucien George",
@@ -43,12 +43,13 @@
   },
   "scripts": {
     "build": "tsup",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsup --silent && tsc --noEmit",
     "test": "playwright test",
     "test:dist": "node scripts/check-dist.mjs && node scripts/check-dist.cjs",
     "prepublishOnly": "npm run typecheck && npm run build && npm run test:dist",
     "pretest": "npm run build",
-    "test:consumer": "bash scripts/consumer-smoke.sh"
+    "test:consumer": "bash scripts/consumer-smoke.sh",
+    "test:real-world": "bash real-world/fetch-ubol.sh && playwright test -c real-world --project chromium --project firefox --project webkit --project ext-ubol"
   },
   "keywords": [
     "playwright",
